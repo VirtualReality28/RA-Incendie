@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>RA Incendie</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080b11;color:white;font-family:Arial,sans-serif}video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#151923}canvas{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}.hud{position:fixed;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}.pill{background:#071523d9;border:1px solid #4db8ee99;padding:9px 11px;border-radius:10px;font-size:12px}.panel{position:fixed;bottom:12px;left:12px;right:12px;background:#081421e8;border:1px solid #4db8ee77;border-radius:14px;padding:12px;display:grid;gap:9px}.buttons{display:flex;gap:8px;flex-wrap:wrap}button{border:1px solid #68c6ff;background:#173954;color:white;border-radius:9px;padding:11px 12px;font-weight:bold;flex:1;min-width:115px}button:disabled{opacity:.4}label{display:flex;align-items:center;gap:12px;font-size:13px}input[type=range]{flex:1}#status{font-size:12px;color:#c6d9e5;line-height:1.4}.reticle{position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);font-size:30px;color:#80d7ff99;pointer-events:none}.warning{color:#ffcb80}
+</style>
+</head>
+<body>
+<video id="camera" autoplay muted playsinline></video>
+<canvas id="fx"></canvas>
+<div class="reticle" id="reticle">+</div>
+<div class="hud"><div class="pill">RA INCENDIE · V1</div><div class="pill" id="angle">Orientation : —</div></div>
+<div class="panel">
+ <div class="buttons"><button id="start">Activer caméra</button><button id="place" disabled>Positionner le feu</button><button id="reset">Réinitialiser</button></div>
+ <label>Intensité du foyer <input type="range" id="intensity" min="10" max="100" value="65"><span id="percent">65 %</span></label>
+ <div id="status">Appuyez sur « Activer caméra ». Autorisez caméra et orientation si demandées.</div>
+</div>
+<script>
+'use strict';
+const video=document.getElementById('camera'),canvas=document.getElementById('fx'),ctx=canvas.getContext('2d');
+const status=document.getElementById('status'),angleEl=document.getElementById('angle'),reticle=document.getElementById('reticle');
+const intensity=document.getElementById('intensity');
+let heading=null,anchor=null,placed=false,particles=[],last=0,cameraOK=false,orientationOK=false;
+const radians=x=>x*Math.PI/180;
+const deltaAngle=(a,b)=>((a-b+540)%360)-180;
+function setStatus(s){status.textContent=s;}
+function onOrientation(e){
+ let a=null;
+ if(typeof e.webkitCompassHeading==='number') a=e.webkitCompassHeading;
+ else if(typeof e.alpha==='number') a=(360-e.alpha)%360;
+ if(a!==null){heading=a;orientationOK=true;angleEl.textContent='Orientation : '+Math.round(a)+'°';}
+}
+async function start(){
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('Caméra indisponible dans ce navigateur ou ce contexte.');
+  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+  video.srcObject=stream;await video.play();cameraOK=true;
+  if(typeof DeviceOrientationEvent!=='undefined'){
+   if(typeof DeviceOrientationEvent.requestPermission==='function'){
+    try{await DeviceOrientationEvent.requestPermission();}catch(e){}
+   }
+   window.addEventListener('deviceorientationabsolute',onOrientation,true);
+   window.addEventListener('deviceorientation',onOrientation,true);
+  }
+  document.getElementById('place').disabled=false;
+  document.getElementById('start').disabled=true;
+  setStatus('Caméra active. Visez un point de la pièce, puis positionnez le feu. Si l’orientation reste indisponible, le foyer restera fixe à l’écran.');
+ }catch(e){setStatus('Impossible d’activer la caméra : '+e.message+' Vérifiez les autorisations et ouvrez le lien dans Chrome.');}
+}
+document.getElementById('start').onclick=start;
+document.getElementById('place').onclick=()=>{placed=true;anchor=heading;particles=[];reticle.style.display='none';setStatus(orientationOK?'Feu placé. Tournez sur vous-même sans vous déplacer : suivi approximatif par orientation, sans ancrage spatial.':'Feu placé au centre de l’écran. Orientation non disponible : le feu suivra l’écran.');};
+document.getElementById('reset').onclick=()=>{placed=false;anchor=null;particles=[];reticle.style.display='block';setStatus(cameraOK?'Visez un nouvel emplacement et appuyez sur « Positionner le feu ».':'Activez la caméra pour commencer.');};
+intensity.oninput=()=>document.getElementById('percent').textContent=intensity.value+' %';
+function resize(){const d=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(innerWidth*d);canvas.height=Math.round(innerHeight*d);ctx.setTransform(d,0,0,d,0,0);}
+window.addEventListener('resize',resize);resize();
+function animate(t){requestAnimationFrame(animate);const dt=Math.min((t-last)/1000||.016,.05);last=t;ctx.clearRect(0,0,innerWidth,innerHeight);
+ if(!placed)return;
+ const power=Number(intensity.value)/100;
+ // Approximate horizontal field of view; no AR camera calibration.
+ const fov=65;let dx=0;
+ if(anchor!==null&&heading!==null)dx=deltaAngle(anchor,heading)/fov*innerWidth;
+ const x=innerWidth/2+dx,y=innerHeight*.63;
+ if(x< -180||x>innerWidth+180)return;
+ const spawn=Math.round(5*power);
+ for(let i=0;i<spawn;i++)particles.push({x:x+(Math.random()-.5)*110*power,y:y+Math.random()*22,vx:(Math.random()-.5)*55,vy:-65-Math.random()*110*power,life:.5+Math.random()*.7,max:1,size:9+Math.random()*24*power});
+ particles=particles.filter(p=>p.life>0).slice(-300);
+ ctx.save();ctx.globalCompositeOperation='screen';
+ const glow=ctx.createRadialGradient(x,y,0,x,y,115*power);glow.addColorStop(0,'rgba(255,95,0,.45)');glow.addColorStop(1,'rgba(255,80,0,0)');ctx.fillStyle=glow;ctx.beginPath();ctx.arc(x,y,115*power,0,Math.PI*2);ctx.fill();
+ for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;const a=Math.min(1,p.life*1.7);const grad=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.size);grad.addColorStop(0,'rgba(255,245,135,'+a+')');grad.addColorStop(.35,'rgba(255,120,0,'+(a*.8)+')');grad.addColorStop(1,'rgba(220,20,0,0)');ctx.fillStyle=grad;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();}
+ ctx.restore();
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
