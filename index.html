@@ -1,78 +1,21 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>RA Incendie</title>
-<style>
-*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080b11;color:white;font-family:Arial,sans-serif}video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#151923}canvas{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}.hud{position:fixed;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}.pill{background:#071523d9;border:1px solid #4db8ee99;padding:9px 11px;border-radius:10px;font-size:12px}.panel{position:fixed;bottom:12px;left:12px;right:12px;background:#081421e8;border:1px solid #4db8ee77;border-radius:14px;padding:12px;display:grid;gap:9px}.buttons{display:flex;gap:8px;flex-wrap:wrap}button{border:1px solid #68c6ff;background:#173954;color:white;border-radius:9px;padding:11px 12px;font-weight:bold;flex:1;min-width:115px}button:disabled{opacity:.4}label{display:flex;align-items:center;gap:12px;font-size:13px}input[type=range]{flex:1}#status{font-size:12px;color:#c6d9e5;line-height:1.4}.reticle{position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);font-size:30px;color:#80d7ff99;pointer-events:none}.warning{color:#ffcb80}
-</style>
-</head>
-<body>
-<video id="camera" autoplay muted playsinline></video>
-<canvas id="fx"></canvas>
-<div class="reticle" id="reticle">+</div>
-<div class="hud"><div class="pill">RA INCENDIE · V1</div><div class="pill" id="angle">Orientation : —</div></div>
-<div class="panel">
- <div class="buttons"><button id="start">Activer caméra</button><button id="place" disabled>Positionner le feu</button><button id="reset">Réinitialiser</button></div>
- <label>Intensité du foyer <input type="range" id="intensity" min="10" max="100" value="65"><span id="percent">65 %</span></label>
- <div id="status">Appuyez sur « Activer caméra ». Autorisez caméra et orientation si demandées.</div>
-</div>
-<script>
-'use strict';
-const video=document.getElementById('camera'),canvas=document.getElementById('fx'),ctx=canvas.getContext('2d');
-const status=document.getElementById('status'),angleEl=document.getElementById('angle'),reticle=document.getElementById('reticle');
-const intensity=document.getElementById('intensity');
-let heading=null,anchor=null,placed=false,particles=[],last=0,cameraOK=false,orientationOK=false;
-const radians=x=>x*Math.PI/180;
-const deltaAngle=(a,b)=>((a-b+540)%360)-180;
-function setStatus(s){status.textContent=s;}
-function onOrientation(e){
- let a=null;
- if(typeof e.webkitCompassHeading==='number') a=e.webkitCompassHeading;
- else if(typeof e.alpha==='number') a=(360-e.alpha)%360;
- if(a!==null){heading=a;orientationOK=true;angleEl.textContent='Orientation : '+Math.round(a)+'°';}
-}
-async function start(){
- try{
-  if(!navigator.mediaDevices?.getUserMedia)throw Error('Caméra indisponible dans ce navigateur ou ce contexte.');
-  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
-  video.srcObject=stream;await video.play();cameraOK=true;
-  if(typeof DeviceOrientationEvent!=='undefined'){
-   if(typeof DeviceOrientationEvent.requestPermission==='function'){
-    try{await DeviceOrientationEvent.requestPermission();}catch(e){}
-   }
-   window.addEventListener('deviceorientationabsolute',onOrientation,true);
-   window.addEventListener('deviceorientation',onOrientation,true);
-  }
-  document.getElementById('place').disabled=false;
-  document.getElementById('start').disabled=true;
-  setStatus('Caméra active. Visez un point de la pièce, puis positionnez le feu. Si l’orientation reste indisponible, le foyer restera fixe à l’écran.');
- }catch(e){setStatus('Impossible d’activer la caméra : '+e.message+' Vérifiez les autorisations et ouvrez le lien dans Chrome.');}
-}
-document.getElementById('start').onclick=start;
-document.getElementById('place').onclick=()=>{placed=true;anchor=heading;particles=[];reticle.style.display='none';setStatus(orientationOK?'Feu placé. Tournez sur vous-même sans vous déplacer : suivi approximatif par orientation, sans ancrage spatial.':'Feu placé au centre de l’écran. Orientation non disponible : le feu suivra l’écran.');};
-document.getElementById('reset').onclick=()=>{placed=false;anchor=null;particles=[];reticle.style.display='block';setStatus(cameraOK?'Visez un nouvel emplacement et appuyez sur « Positionner le feu ».':'Activez la caméra pour commencer.');};
-intensity.oninput=()=>document.getElementById('percent').textContent=intensity.value+' %';
-function resize(){const d=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(innerWidth*d);canvas.height=Math.round(innerHeight*d);ctx.setTransform(d,0,0,d,0,0);}
-window.addEventListener('resize',resize);resize();
-function animate(t){requestAnimationFrame(animate);const dt=Math.min((t-last)/1000||.016,.05);last=t;ctx.clearRect(0,0,innerWidth,innerHeight);
- if(!placed)return;
- const power=Number(intensity.value)/100;
- // Approximate horizontal field of view; no AR camera calibration.
- const fov=65;let dx=0;
- if(anchor!==null&&heading!==null)dx=deltaAngle(anchor,heading)/fov*innerWidth;
- const x=innerWidth/2+dx,y=innerHeight*.63;
- if(x< -180||x>innerWidth+180)return;
- const spawn=Math.round(5*power);
- for(let i=0;i<spawn;i++)particles.push({x:x+(Math.random()-.5)*110*power,y:y+Math.random()*22,vx:(Math.random()-.5)*55,vy:-65-Math.random()*110*power,life:.5+Math.random()*.7,max:1,size:9+Math.random()*24*power});
- particles=particles.filter(p=>p.life>0).slice(-300);
- ctx.save();ctx.globalCompositeOperation='screen';
- const glow=ctx.createRadialGradient(x,y,0,x,y,115*power);glow.addColorStop(0,'rgba(255,95,0,.45)');glow.addColorStop(1,'rgba(255,80,0,0)');ctx.fillStyle=glow;ctx.beginPath();ctx.arc(x,y,115*power,0,Math.PI*2);ctx.fill();
- for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;const a=Math.min(1,p.life*1.7);const grad=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.size);grad.addColorStop(0,'rgba(255,245,135,'+a+')');grad.addColorStop(.35,'rgba(255,120,0,'+(a*.8)+')');grad.addColorStop(1,'rgba(220,20,0,0)');ctx.fillStyle=grad;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();}
- ctx.restore();
-}
-requestAnimationFrame(animate);
-</script>
-</body>
-</html>
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>RA Incendie V2</title><style>
+*{box-sizing:border-box}body{margin:0;background:#101820;color:#fff;font-family:Arial,sans-serif;overflow:hidden}#view{position:fixed;inset:0}#hud{position:fixed;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;pointer-events:none;gap:10px}.pill{background:#071724db;border:1px solid #61caff88;padding:9px;border-radius:9px;font-size:12px}#panel{position:fixed;bottom:12px;left:12px;right:12px;background:#071724ed;border:1px solid #61caff88;border-radius:12px;padding:12px;display:grid;gap:9px}button{background:#17445c;color:white;border:1px solid #66cfff;border-radius:9px;padding:12px;font-weight:bold}button:disabled{opacity:.45}#buttons{display:flex;gap:8px}#buttons button{flex:1}label{display:flex;gap:12px;align-items:center;font-size:13px}input{flex:1}#status{font-size:12px;line-height:1.5;color:#d5e5ef}#aim{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;color:#87e2ff;font-size:30px;text-shadow:0 0 6px #000}#aim.hidden{display:none}</style></head><body>
+<div id="view"></div><div id="aim">+</div><div id="hud"><div class="pill">RA INCENDIE · V2 WebXR</div><div class="pill" id="tracking">RA inactive</div></div><div id="panel"><div id="buttons"><button id="start">Démarrer la RA</button><button id="place" disabled>Positionner le feu</button><button id="reset" disabled>Retirer le feu</button></div><label>Intensité <input id="power" type="range" min="10" max="100" value="65"><span id="pct">65 %</span></label><div id="status">Sur Chrome Android, appuyez sur « Démarrer la RA ». Balayez lentement le sol avec le téléphone pour détecter une surface.</div></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js';
+const $=id=>document.getElementById(id),status=s=>$('status').textContent=s;
+const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.xr.enabled=true;$('view').appendChild(renderer.domElement);
+const scene=new THREE.Scene();const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.01,100);scene.add(new THREE.HemisphereLight(0xffffff,0x664422,1.5));
+const marker=new THREE.Mesh(new THREE.RingGeometry(.11,.15,32).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:0x70e4ff,side:THREE.DoubleSide}));marker.matrixAutoUpdate=false;marker.visible=false;scene.add(marker);
+let session=null,referenceSpace=null,viewerSpace=null,hitSource=null,hitRequested=false,hasHit=false,fire=null,flames=[],smoke=[],elapsed=0;
+const flameMat=()=>new THREE.MeshBasicMaterial({color:0xff6b00,transparent:true,opacity:.8,depthWrite:false,side:THREE.DoubleSide});
+function makeFire(){const g=new THREE.Group();const glow=new THREE.PointLight(0xff5a00,2.2,2.5);glow.position.y=.35;g.add(glow);for(let i=0;i<26;i++){const h=.22+Math.random()*.55;const mesh=new THREE.Mesh(new THREE.ConeGeometry(.035+Math.random()*.09,h,5),flameMat());mesh.position.set((Math.random()-.5)*.42,h*.5,(Math.random()-.5)*.42);mesh.userData={base:mesh.position.y,phase:Math.random()*6.28,speed:2+Math.random()*3,scale:.7+Math.random()*.6};g.add(mesh);flames.push(mesh)}for(let i=0;i<12;i++){const m=new THREE.Mesh(new THREE.SphereGeometry(.13+Math.random()*.11,7,5),new THREE.MeshBasicMaterial({color:0x777777,transparent:true,opacity:.1,depthWrite:false}));m.userData={phase:Math.random()*6.28,offset:Math.random()*1.3};g.add(m);smoke.push(m)}return g}
+function clearFire(){if(fire){scene.remove(fire);fire.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose()});fire=null}flames=[];smoke=[];$('reset').disabled=true}
+$('power').oninput=()=>{$('pct').textContent=$('power').value+' %'};
+$('start').onclick=async()=>{try{if(!navigator.xr)throw Error('WebXR non disponible dans ce navigateur. Essayez Chrome Android et vérifiez Google Play Services for AR.');const ok=await navigator.xr.isSessionSupported('immersive-ar');if(!ok)throw Error('Mode immersive-ar non pris en charge sur cet appareil ou navigateur.');session=await navigator.xr.requestSession('immersive-ar',{requiredFeatures:['hit-test','local'],optionalFeatures:['dom-overlay'],domOverlay:{root:document.body}});session.addEventListener('end',()=>{session=null;hitSource=null;hitRequested=false;hasHit=false;marker.visible=false;$('place').disabled=true;$('start').disabled=false;$('tracking').textContent='RA arrêtée';status('Session terminée. Relancez la RA pour recommencer.')});await renderer.xr.setSession(session);referenceSpace=await session.requestReferenceSpace('local');viewerSpace=await session.requestReferenceSpace('viewer');hitSource=await session.requestHitTestSource({space:viewerSpace});$('start').disabled=true;$('tracking').textContent='Recherche de surface';status('Déplacez doucement la caméra vers le sol. Un cercle bleu apparaîtra sur une surface détectée.');}catch(e){status('Échec RA : '+e.message);$('tracking').textContent='RA indisponible';if(session){try{await session.end()}catch{}}}};
+$('place').onclick=()=>{if(!hasHit)return;clearFire();fire=makeFire();fire.position.setFromMatrixPosition(marker.matrix);scene.add(fire);$('reset').disabled=false;status('Foyer positionné sur la surface détectée. Tournez ou déplacez le téléphone : il doit rester au même endroit.');};
+$('reset').onclick=()=>{clearFire();status('Foyer retiré. Visez une surface pour le replacer.')};
+renderer.setAnimationLoop((time,frame)=>{if(frame&&session&&hitSource){const hits=frame.getHitTestResults(hitSource);if(hits.length){const pose=hits[0].getPose(referenceSpace);if(pose){marker.matrix.fromArray(pose.transform.matrix);marker.visible=!fire;hasHit=true;$('place').disabled=false;$('tracking').textContent='Surface détectée';}}else{hasHit=false;marker.visible=false;$('place').disabled=true;$('tracking').textContent='Recherche de surface';}}if(fire){elapsed=time*.001;const p=Number($('power').value)/100;fire.scale.setScalar(.55+p*.9);for(const f of flames){const d=f.userData;f.scale.y=d.scale*(.75+.28*Math.sin(elapsed*d.speed+d.phase));f.position.y=d.base+.04*Math.sin(elapsed*2+d.phase);f.material.opacity=.65+.25*Math.sin(elapsed*3+d.phase)}for(const s of smoke){const d=s.userData;s.position.set(Math.sin(elapsed*.7+d.phase)*.13,.55+((elapsed*.17+d.offset)%1.25),Math.cos(elapsed*.6+d.phase)*.12);s.scale.setScalar(.6+((elapsed*.17+d.offset)%1.25));s.material.opacity=.07*p}}renderer.render(scene,camera)});
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+</script></body></html>
